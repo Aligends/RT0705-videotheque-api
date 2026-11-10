@@ -9,9 +9,23 @@ WORKDIR /srv
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Le code est copié dans l'image ; en développement, docker-compose monte
-# le dossier app/ de l'hôte par-dessus (volume partagé, rechargement à chaud).
+# Compte sans privilège : le serveur ne tourne jamais en root.
+RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin appli
+
+# Le code est copié dans l'image ; docker-compose monte en plus le dossier app/
+# de l'hôte par-dessus, en lecture seule (volume partagé demandé par le sujet).
+COPY demarrage.sh .
 COPY app/ app/
 
+USER appli
 EXPOSE 5000
-CMD ["flask", "run", "--host=0.0.0.0", "--port=5000"]
+
+HEALTHCHECK --interval=10s --timeout=3s --start-period=15s --retries=5 \
+    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/api/v1/sante', timeout=2)"]
+
+# Serveur WSGI de production (le serveur de développement de Flask, avec son
+# débogueur, n'est utilisé que par docker-compose.dev.yml).
+ENTRYPOINT ["sh", "/srv/demarrage.sh"]
+CMD ["gunicorn", "--bind=0.0.0.0:5000", "--workers=2", "--threads=4", \
+     "--worker-tmp-dir=/dev/shm", "--no-control-socket", "--access-logfile=-", \
+     "app:create_app()"]

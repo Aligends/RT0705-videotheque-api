@@ -1,0 +1,44 @@
+# Site en HTTPS : un proxy inverse (Caddy) chiffre les échanges avec le
+# navigateur ; ni le site ni l'API ne sont publiés directement.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.https.yml up -d --build
+#
+#   navigateur --HTTPS--> proxy:443 --HTTP--> web:5000 --JSON--> api:5000 --SQL--> db
+services:
+  proxy:
+    image: caddy:2-alpine
+    ports:
+      - "${HTTP_PORT:-80}:80"     # redirigé vers HTTPS
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./deploiement/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data          # autorité de certification interne et certificats
+      - caddy_config:/config
+    depends_on:
+      - web
+    networks:
+      - frontal
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE          # écouter sur les ports 80 et 443
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 200
+    mem_limit: 256m
+    restart: unless-stopped
+
+  web:
+    environment:
+      COOKIES_SECURISES: "1"      # cookie de session envoyé en HTTPS uniquement
+      NB_PROXYS: "1"              # fait confiance aux en-têtes X-Forwarded-* du proxy
+    networks:
+      - frontal                   # le proxy joint le site, mais pas l'API ni la base
+
+networks:
+  frontal:
+
+volumes:
+  caddy_data:
+  caddy_config:

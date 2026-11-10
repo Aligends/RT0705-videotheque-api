@@ -1,0 +1,17 @@
+# Mode développement : serveur Flask avec débogueur et rechargement à chaud
+# (le dossier app/ de l'hôte est monté dans le conteneur), pages de test du TP.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.override.yml \
+#                  -f docker-compose.dev.yml up --build
+#
+# À réserver à une machine de développement : le débogueur de Flask permet
+# d'exécuter du code sur le serveur.
+services:
+  api:
+    command: ["flask", "run", "--host=0.0.0.0", "--port=5000", "--debug"]
+    environment:
+      INSCRIPTION: ouverte        # comptes utilisables sans validation
+  web:
+    command: ["flask", "run", "--host=0.0.0.0", "--port=5000", "--debug"]
+    environment:
+      PAGES_TP: "1"               # pages de test du conteneur, sous /tp

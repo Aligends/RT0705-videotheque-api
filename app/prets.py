@@ -1,13 +1,19 @@
-"""Ressource « prêts » : prêt d'un film sur support physique, puis retour."""
+"""Ressource « prêts » : prêt d'un film sur support physique, puis retour.
+
+Les prêts contiennent le nom des emprunteurs : toutes ces routes sont
+réservées aux utilisateurs connectés.
+"""
 from datetime import date
 
 import psycopg
 from flask import Blueprint, request
 
-from .auth import connexion_requise
+from .audit import journaliser
+from .auth import admin_requis, connexion_requise
 from .db import get_db
 from .erreurs import ErreurAPI, corps_json
 from .films import lire_film
+from .validation import Validateur, bloc_pagination, pagination, parametre_booleen
 
 bp = Blueprint("prets", __name__)
 
@@ -20,16 +26,6 @@ SELECT_PRET = """
 """
 
 
-def _date(donnees, champ):
-    valeur = donnees.get(champ)
-    if valeur is None or valeur == "":
-        return None
-    try:
-        return date.fromisoformat(valeur)
-    except (TypeError, ValueError):
-        raise ErreurAPI(400, "Données invalides.", {champ: "Date attendue au format AAAA-MM-JJ."})
-
-
 def _lire_pret(pret_id):
     pret = get_db().execute(SELECT_PRET + " WHERE p.id = %s", (pret_id,)).fetchone()
     if pret is None:
@@ -38,19 +34,25 @@ def _lire_pret(pret_id):
 
 
 @bp.get("/prets")
+@connexion_requise
 def lister_prets():
-    """Tous les prêts ; ?en_cours=true ne garde que les films non rendus."""
-    en_cours = request.args.get("en_cours", "").lower()
+    """Liste paginée ; ?en_cours=true ne garde que les films non rendus."""
+    en_cours = parametre_booleen("en_cours")
     ou = ""
-    if en_cours in ("1", "true", "oui"):
-        ou = " WHERE p.date_retour IS NULL"
-    elif en_cours in ("0", "false", "non"):
-        ou = " WHERE p.date_retour IS NOT NULL"
-    prets = get_db().execute(SELECT_PRET + ou + " ORDER BY p.date_pret DESC, p.id DESC").fetchall()
-    return {"prets": prets}
+    if en_cours is not None:
+        ou = " WHERE p.date_retour IS " + ("NULL" if en_cours else "NOT NULL")
+    page, par_page, decalage = pagination(50)
+    db = get_db()
+    total = db.execute("SELECT count(*) AS n FROM prets p" + ou).fetchone()["n"]
+    prets = db.execute(
+        SELECT_PRET + ou + " ORDER BY p.date_pret DESC, p.id DESC LIMIT %s OFFSET %s",
+        (par_page, decalage),
+    ).fetchall()
+    return {"prets": prets, "pagination": bloc_pagination(page, par_page, total)}
 
 
 @bp.get("/films/<int:film_id>/prets")
+@connexion_requise
 def prets_du_film(film_id):
     """Historique des prêts d'un film."""
     lire_film(film_id)
@@ -64,19 +66,16 @@ def prets_du_film(film_id):
 @connexion_requise
 def preter_film(film_id):
     film = lire_film(film_id)
-    donnees = corps_json()
-    emprunteur = donnees.get("emprunteur")
-    if not isinstance(emprunteur, str) or not emprunteur.strip() or len(emprunteur.strip()) > 100:
-        raise ErreurAPI(400, "Données invalides.",
-                        {"emprunteur": "Obligatoire (100 caractères au plus)."})
-    commentaire = donnees.get("commentaire")
-    if commentaire is not None and not isinstance(commentaire, str):
-        raise ErreurAPI(400, "Données invalides.", {"commentaire": "Doit être une chaîne."})
-    date_pret = _date(donnees, "date_pret") or date.today()
-    retour_prevu = _date(donnees, "date_retour_prevue")
+    v = Validateur(corps_json(), ("emprunteur", "date_pret", "date_retour_prevue", "commentaire"))
+    emprunteur = v.texte("emprunteur", 100, obligatoire=True)
+    commentaire = v.texte("commentaire", 500, multiligne=True)
+    date_pret = v.date("date_pret") or date.today()
+    retour_prevu = v.date("date_retour_prevue")
+    if date_pret > date.today():
+        v.erreur("date_pret", "Ne peut pas être dans le futur.")
     if retour_prevu and retour_prevu < date_pret:
-        raise ErreurAPI(400, "Données invalides.",
-                        {"date_retour_prevue": "Ne peut pas précéder la date du prêt."})
+        v.erreur("date_retour_prevue", "Ne peut pas précéder la date du prêt.")
+    v.verifier()
 
     if film["support"] != "physique":
         raise ErreurAPI(409, "Seuls les films sur support physique peuvent être prêtés.")
@@ -85,10 +84,11 @@ def preter_film(film_id):
         pret_id = db.execute(
             "INSERT INTO prets (film_id, emprunteur, date_pret, date_retour_prevue, commentaire) "
             "VALUES (%s, %s, %s, %s, %s) RETURNING id",
-            (film_id, emprunteur.strip(), date_pret, retour_prevu, commentaire or None),
+            (film_id, emprunteur, date_pret, retour_prevu, commentaire),
         ).fetchone()["id"]
     except psycopg.errors.UniqueViolation:  # index unique : un seul prêt en cours par film
         raise ErreurAPI(409, "Ce film est déjà prêté.")
+    journaliser("pret_cree", cible=f"« {film['titre']} » prêté à {emprunteur}")
     db.commit()
     return {"pret": _lire_pret(pret_id)}, 201
 
@@ -100,22 +100,30 @@ def retour_pret(pret_id):
     pret = _lire_pret(pret_id)
     if not pret["en_cours"]:
         raise ErreurAPI(409, "Ce film a déjà été rendu.")
-    donnees = request.get_json(silent=True)
-    date_retour = _date(donnees if isinstance(donnees, dict) else {}, "date_retour") or date.today()
+    donnees = request.get_json(silent=True)     # corps facultatif
+    v = Validateur(donnees if isinstance(donnees, dict) else {}, ("date_retour",))
+    date_retour = v.date("date_retour") or date.today()
     if date_retour < pret["date_pret"]:
-        raise ErreurAPI(400, "Données invalides.",
-                        {"date_retour": "Ne peut pas précéder la date du prêt."})
+        v.erreur("date_retour", "Ne peut pas précéder la date du prêt.")
+    elif date_retour > date.today():
+        v.erreur("date_retour", "Ne peut pas être dans le futur.")
+    v.verifier()
+
     db = get_db()
     db.execute("UPDATE prets SET date_retour = %s WHERE id = %s", (date_retour, pret_id))
+    journaliser("pret_retour", cible=f"« {pret['film_titre']} » rendu par {pret['emprunteur']}")
     db.commit()
     return {"pret": _lire_pret(pret_id)}
 
 
 @bp.delete("/prets/<int:pret_id>")
-@connexion_requise
+@admin_requis
 def supprimer_pret(pret_id):
+    """Retire un prêt de l'historique (administrateur)."""
+    pret = _lire_pret(pret_id)
     db = get_db()
-    if db.execute("DELETE FROM prets WHERE id = %s", (pret_id,)).rowcount == 0:
-        raise ErreurAPI(404, f"Prêt {pret_id} introuvable.")
+    db.execute("DELETE FROM prets WHERE id = %s", (pret_id,))
+    journaliser("pret_supprime",
+                cible=f"prêt de « {pret['film_titre']} » à {pret['emprunteur']}")
     db.commit()
     return "", 204

@@ -1,56 +1,89 @@
-# Création coordonnée des trois conteneurs de la vidéothèque.
+# Création coordonnée des conteneurs de la vidéothèque.
+#
+#   navigateur --HTTP--> web:5000 --JSON/HTTP--> api:5000 --SQL--> db:5432
 #
 # Les trois dépôts doivent être clonés côte à côte :
 #   RT0705-videotheque-api/        (ce dépôt)
 #   RT0705-videotheque-data-base/
 #   RT0705-videotheque-serveur/
-# Les chemins se changent au besoin avec DB_CONTEXT et WEB_CONTEXT (fichier .env).
+# (chemins modifiables avec DB_CONTEXT et WEB_CONTEXT dans .env).
 #
-#   navigateur --HTTP--> web:5000 --JSON/HTTP--> api:5000 --SQL--> db:5432
+# Ce fichier décrit les services sans rien publier sur l'hôte. La publication
+# est faite par l'un des fichiers suivants :
+#   docker-compose.override.yml  chargé automatiquement : site en HTTP (TP)
+#   docker-compose.https.yml     site en HTTPS derrière un proxy inverse
+#   docker-compose.dev.yml       en plus, pour développer (débogueur Flask)
+#
+# Tous les secrets viennent du fichier .env, créé par scripts/init-env.sh :
+# il n'existe aucune valeur par défaut.
+
+# Durcissement commun aux deux conteneurs Flask.
+x-durcissement: &durcissement
+  read_only: true                 # système de fichiers en lecture seule
+  tmpfs:
+    - /tmp
+  cap_drop:
+    - ALL                         # aucune capacité Linux
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 200
+  mem_limit: 512m
+  restart: unless-stopped
+
 services:
   db:
     build: ${DB_CONTEXT:-../RT0705-videotheque-data-base}
     image: rt0705-videotheque-db
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-videotheque}
-      POSTGRES_USER: ${POSTGRES_USER:-videotheque}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-videotheque}
+      POSTGRES_DB: videotheque
+      POSTGRES_USER: videotheque
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Lancez scripts/init-env.sh pour creer le fichier .env}
+      API_DB_PASSWORD: ${API_DB_PASSWORD:?Lancez scripts/init-env.sh pour creer le fichier .env}
+      DONNEES_DEMO: ${DONNEES_DEMO:-0}
     volumes:
       - db_data:/var/lib/postgresql/data
-    networks: [donnees]          # réseau interne : la base n'est pas exposée sur l'hôte
+    networks:
+      - donnees                   # réseau interne : la base n'est jamais publiée
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 200
+    mem_limit: 512m
     restart: unless-stopped
 
   api:
     build: .
     image: rt0705-videotheque-api
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-videotheque}:${POSTGRES_PASSWORD:-videotheque}@db:5432/${POSTGRES_DB:-videotheque}
-      SECRET_KEY: ${API_SECRET_KEY:-cle-api-de-developpement}
-      FLASK_DEBUG: ${FLASK_DEBUG:-1}
+      # Compte PostgreSQL à droits restreints, pas le propriétaire de la base.
+      DATABASE_URL: postgresql://videotheque_api:${API_DB_PASSWORD}@db:5432/videotheque
+      SECRET_KEY: ${API_SECRET_KEY:?Lancez scripts/init-env.sh pour creer le fichier .env}
+      INSCRIPTION: ${INSCRIPTION:-validation}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_MOT_DE_PASSE: ${ADMIN_MOT_DE_PASSE:-}
     volumes:
-      - ./app:/srv/app           # volume partagé avec l'hôte
-    ports:
-      - "127.0.0.1:5001:5000"    # pour tester l'API depuis l'hôte (curl, Postman)
+      - ./app:/srv/app:ro         # volume partagé avec l'hôte, en lecture seule
     depends_on:
       db:
         condition: service_healthy
-    networks: [donnees, presentation]
-    restart: unless-stopped
+    networks:
+      - donnees
+      - presentation
+    <<: *durcissement
 
   web:
     build: ${WEB_CONTEXT:-../RT0705-videotheque-serveur}
     image: rt0705-videotheque-web
     environment:
       API_URL: http://api:5000/api/v1
-      SECRET_KEY: ${WEB_SECRET_KEY:-cle-web-de-developpement}
-      FLASK_DEBUG: ${FLASK_DEBUG:-1}
+      SECRET_KEY: ${WEB_SECRET_KEY:?Lancez scripts/init-env.sh pour creer le fichier .env}
     volumes:
-      - ${WEB_CONTEXT:-../RT0705-videotheque-serveur}/app:/srv/app
-    ports:
-      - "8080:5000"              # le site : http://localhost:8080
-    depends_on: [api]
-    networks: [presentation]
-    restart: unless-stopped
+      - ${WEB_CONTEXT:-../RT0705-videotheque-serveur}/app:/srv/app:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - presentation              # le site ne peut pas joindre la base
+    <<: *durcissement
 
 networks:
   donnees:

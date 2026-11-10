@@ -1,0 +1,26 @@
+# Proxy inverse HTTPS devant le site web.
+#
+# Le certificat est émis par l'autorité interne de Caddy, pour le nom ou
+# l'adresse IP utilisés par le navigateur. Tant que cette autorité n'est pas
+# installée sur le poste, le navigateur affiche un avertissement : c'est
+# attendu pour un TP. Pour un vrai nom de domaine, remplacer « :443 » par ce
+# nom et supprimer le bloc « tls » : Caddy obtient alors un certificat reconnu.
+{
+	admin off
+}
+
+:80 {
+	redir https://{host}{uri} permanent
+}
+
+:443 {
+	tls internal {
+		on_demand
+	}
+	encode gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+	reverse_proxy web:5000
+}

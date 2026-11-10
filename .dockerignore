@@ -1,6 +1,10 @@
 .git
+.env
 __pycache__
 .pytest_cache
-.env
 venv
 .venv
+tests
+docs
+scripts
+sauvegardes

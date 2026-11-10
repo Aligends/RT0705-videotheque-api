@@ -9,10 +9,16 @@ def get_db():
 
     Les lignes sont renvoyées sous forme de dictionnaires. Les écritures
     doivent être validées explicitement par ``commit()`` ; tout ce qui n'est
-    pas validé est annulé à la fin de la requête.
+    pas validé est annulé à la fin de la requête. Les valeurs sont toujours
+    passées en paramètres, jamais insérées dans le texte SQL.
     """
     if "db" not in g:
-        g.db = psycopg.connect(current_app.config["DATABASE_URL"], row_factory=dict_row)
+        g.db = psycopg.connect(
+            current_app.config["DATABASE_URL"],
+            row_factory=dict_row,
+            connect_timeout=5,
+            application_name="videotheque-api",
+        )
     return g.db
 
 

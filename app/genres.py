@@ -2,9 +2,11 @@
 import psycopg
 from flask import Blueprint
 
-from .auth import connexion_requise
+from .audit import journaliser
+from .auth import admin_requis, connexion_requise
 from .db import get_db
 from .erreurs import ErreurAPI, corps_json
+from .validation import Validateur
 
 bp = Blueprint("genres", __name__)
 
@@ -22,28 +24,29 @@ def lister_genres():
 @bp.post("/genres")
 @connexion_requise
 def creer_genre():
-    nom = corps_json().get("nom")
-    if not isinstance(nom, str) or not nom.strip() or len(nom.strip()) > 50:
-        raise ErreurAPI(400, "Données invalides.",
-                        {"nom": "Obligatoire (50 caractères au plus)."})
+    v = Validateur(corps_json(), ("nom",))
+    nom = v.texte("nom", 50, obligatoire=True)
+    v.verifier()
     db = get_db()
     try:
         genre = db.execute(
-            "INSERT INTO genres (nom) VALUES (%s) RETURNING id, nom, 0 AS nb_films",
-            (nom.strip(),),
+            "INSERT INTO genres (nom) VALUES (%s) RETURNING id, nom, 0 AS nb_films", (nom,),
         ).fetchone()
     except psycopg.errors.UniqueViolation:
         raise ErreurAPI(409, "Ce genre existe déjà.")
+    journaliser("genre_cree", cible=nom)
     db.commit()
     return {"genre": genre}, 201
 
 
 @bp.delete("/genres/<int:genre_id>")
-@connexion_requise
+@admin_requis
 def supprimer_genre(genre_id):
     """Supprime le genre ; les films concernés sont conservés."""
     db = get_db()
-    if db.execute("DELETE FROM genres WHERE id = %s", (genre_id,)).rowcount == 0:
+    ligne = db.execute("DELETE FROM genres WHERE id = %s RETURNING nom", (genre_id,)).fetchone()
+    if ligne is None:
         raise ErreurAPI(404, f"Genre {genre_id} introuvable.")
+    journaliser("genre_supprime", cible=ligne["nom"])
     db.commit()
     return "", 204
