@@ -1,0 +1,61 @@
+# Création coordonnée des trois conteneurs de la vidéothèque.
+#
+# Les trois dépôts doivent être clonés côte à côte :
+#   RT0705-videotheque-api/        (ce dépôt)
+#   RT0705-videotheque-data-base/
+#   RT0705-videotheque-serveur/
+# Les chemins se changent au besoin avec DB_CONTEXT et WEB_CONTEXT (fichier .env).
+#
+#   navigateur --HTTP--> web:5000 --JSON/HTTP--> api:5000 --SQL--> db:5432
+services:
+  db:
+    build: ${DB_CONTEXT:-../RT0705-videotheque-data-base}
+    image: rt0705-videotheque-db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-videotheque}
+      POSTGRES_USER: ${POSTGRES_USER:-videotheque}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-videotheque}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks: [donnees]          # réseau interne : la base n'est pas exposée sur l'hôte
+    restart: unless-stopped
+
+  api:
+    build: .
+    image: rt0705-videotheque-api
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-videotheque}:${POSTGRES_PASSWORD:-videotheque}@db:5432/${POSTGRES_DB:-videotheque}
+      SECRET_KEY: ${API_SECRET_KEY:-cle-api-de-developpement}
+      FLASK_DEBUG: ${FLASK_DEBUG:-1}
+    volumes:
+      - ./app:/srv/app           # volume partagé avec l'hôte
+    ports:
+      - "127.0.0.1:5001:5000"    # pour tester l'API depuis l'hôte (curl, Postman)
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [donnees, presentation]
+    restart: unless-stopped
+
+  web:
+    build: ${WEB_CONTEXT:-../RT0705-videotheque-serveur}
+    image: rt0705-videotheque-web
+    environment:
+      API_URL: http://api:5000/api/v1
+      SECRET_KEY: ${WEB_SECRET_KEY:-cle-web-de-developpement}
+      FLASK_DEBUG: ${FLASK_DEBUG:-1}
+    volumes:
+      - ${WEB_CONTEXT:-../RT0705-videotheque-serveur}/app:/srv/app
+    ports:
+      - "8080:5000"              # le site : http://localhost:8080
+    depends_on: [api]
+    networks: [presentation]
+    restart: unless-stopped
+
+networks:
+  donnees:
+    internal: true
+  presentation:
+
+volumes:
+  db_data:
