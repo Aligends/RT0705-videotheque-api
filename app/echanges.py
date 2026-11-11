@@ -19,6 +19,11 @@ FORMAT = "videotheque-rt0705"
 MAX_FILMS_IMPORT = 500
 
 
+def _pluriel(nombre, mot):
+    """1 film, 2 films."""
+    return f"{nombre} {mot}{'s' if nombre > 1 else ''}"
+
+
 @bp.get("/export")
 @connexion_requise
 def exporter():
@@ -29,7 +34,7 @@ def exporter():
         "             WHERE fg.film_id = f.id ORDER BY lower(ge.nom)) AS genres "
         "FROM films f ORDER BY lower(f.titre), f.id"
     ).fetchall()
-    journaliser("export", details=f"{len(films)} films")
+    journaliser("export", details=_pluriel(len(films), "film"))
     db.commit()
     return {"format": FORMAT, "version": 1,
             "exporte_le": datetime.now(timezone.utc).replace(microsecond=0),
@@ -81,6 +86,7 @@ def importer():
         connus.add(identite)
         inserer_film(valeurs, genres)
     importes = len(valides) - len(ignores)
-    journaliser("import", details=f"{importes} films ajoutés, {len(ignores)} ignorés")
+    journaliser("import", details=f"{_pluriel(importes, 'film')} ajouté{'s' if importes > 1 else ''}, "
+                                  f"{len(ignores)} déjà présent{'s' if len(ignores) > 1 else ''}")
     db.commit()
     return {"importes": importes, "ignores": ignores}
