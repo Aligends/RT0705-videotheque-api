@@ -28,6 +28,7 @@ ADMIN_MOT_DE_PASSE=$mot_de_passe_admin
 INSCRIPTION=validation
 DONNEES_DEMO=1
 WEB_PORT=8080
+NOM_DU_SITE=localhost
 FIN
 
 cat <<FIN

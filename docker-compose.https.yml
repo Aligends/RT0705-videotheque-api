@@ -7,9 +7,12 @@
 services:
   proxy:
     image: caddy:2-alpine
+    environment:
+      # Nom ou adresse IP du site, tel qu'on le tape dans le navigateur.
+      NOM_DU_SITE: ${NOM_DU_SITE:-localhost}
     ports:
-      - "${HTTP_PORT:-80}:80"     # redirigé vers HTTPS
-      - "${HTTPS_PORT:-443}:443"
+      - "80:80"                   # redirigé vers HTTPS
+      - "443:443"
     volumes:
       - ./deploiement/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data          # autorité de certification interne et certificats

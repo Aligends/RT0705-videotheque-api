@@ -5,6 +5,7 @@
 set -eu
 cd "$(dirname "$0")/.."
 
+umask 077                       # fichiers lisibles par leur seul propriétaire
 mkdir -p sauvegardes
 chmod 700 sauvegardes           # les sauvegardes contiennent des données personnelles
 fichier="sauvegardes/videotheque-$(date +%Y%m%d-%H%M%S).dump"
