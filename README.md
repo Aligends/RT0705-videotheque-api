@@ -2,46 +2,90 @@
 
 Tiers d'accès aux données de l'application de gestion de vidéothèque (projet RT0705).
 API REST en Python / Flask : elle reçoit et renvoie du **JSON**, et stocke les
-données dans une **base PostgreSQL**.
-
-Le projet est réparti sur trois dépôts :
+données dans une **base PostgreSQL**. Ce dépôt porte aussi l'orchestration
+Docker de l'application complète.
 
 | Dépôt | Tiers |
 |---|---|
 | `RT0705-videotheque-serveur` | présentation (site web Flask / Jinja) |
-| `RT0705-videotheque-api` (celui-ci) | accès aux données (API REST) |
-| `RT0705-videotheque-data-base` | stockage (PostgreSQL : schéma et données) |
+| `RT0705-videotheque-api` (celui-ci) | accès aux données (API REST), orchestration, scripts |
+| `RT0705-videotheque-data-base` | stockage (PostgreSQL : schéma, rôles, données de démonstration) |
 
-Le dossier de conception (fonctionnalités, acteurs, données, échanges,
-architecture, description complète de l'API et formats JSON) est dans
-[`docs/conception.md`](docs/conception.md).
+```
+navigateur --HTTP(S)--> site web --JSON/HTTP--> API REST --SQL--> PostgreSQL
+```
 
-## Lancer l'application complète
+## Démarrage
 
-Cloner les trois dépôts côte à côte, puis depuis ce dépôt :
+Cloner les trois dépôts côte à côte, puis, depuis ce dépôt :
+
+```bash
+scripts/init-env.sh
+```
 
 ```bash
 docker compose up -d --build
 ```
 
+Le premier script crée le fichier `.env` avec des secrets aléatoires et affiche
+le mot de passe de l'administrateur (`admin@videotheque.local`). Il n'existe
+aucun mot de passe par défaut : sans `.env`, `docker compose` refuse de démarrer.
+
 - site web : <http://localhost:8080>
-- API : <http://localhost:5001/api/v1> (accessible depuis l'hôte uniquement)
-- compte de démonstration : `demo@videotheque.local` / `videotheque`
+- API : <http://localhost:5001/api/v1> (depuis la machine hôte uniquement)
 
-Pour un usage autre que le TP, copier `.env.example` en `.env` et changer les
-mots de passe et les clés. Si les dépôts voisins portent un autre nom de dossier,
-renseigner `DB_CONTEXT` et `WEB_CONTEXT` dans `.env`.
+Tout arrêter en conservant les données, ou en les effaçant :
 
-Tout arrêter et effacer la base :
+```bash
+docker compose down
+```
 
 ```bash
 docker compose down -v
 ```
 
-## Utiliser l'API
+## Trois façons de lancer l'application
+
+| Mode | Commande | Ce qui change |
+|---|---|---|
+| TP (défaut) | `docker compose up -d --build` | site en HTTP sur le port 8080, API sur `127.0.0.1:5001` |
+| HTTPS | `docker compose -f docker-compose.yml -f docker-compose.https.yml up -d --build` | un proxy Caddy chiffre les échanges (ports 80 et 443) ; ni le site ni l'API ne sont publiés directement |
+| Développement | `docker compose -f docker-compose.yml -f docker-compose.override.yml -f docker-compose.dev.yml up --build` | serveur Flask avec débogueur et rechargement à chaud, inscriptions ouvertes, pages de test `/tp` |
+
+En HTTPS, indiquer dans `.env` le nom ou l'adresse IP tapés dans le navigateur
+(`NOM_DU_SITE=192.168.1.20`). Le certificat vient de l'autorité interne de
+Caddy : le navigateur affiche un avertissement tant qu'elle n'est pas installée
+sur le poste.
+
+Le mode développement ne doit servir que sur une machine de développement : le
+débogueur de Flask permet d'exécuter du code sur le serveur.
+
+## Comptes et droits
+
+| Profil | Droits |
+|---|---|
+| Visiteur | consulter les films, les avis, les genres et les statistiques |
+| Membre | ajouter des films, modifier ou supprimer les siens, donner son avis, gérer les prêts, exporter le catalogue |
+| Administrateur | tout modifier, importer un catalogue, gérer les comptes, lire le journal d'audit |
+
+Par défaut (`INSCRIPTION=validation`), un compte créé depuis le site reste en
+attente jusqu'à ce qu'un administrateur l'active (page « Comptes »).
+`INSCRIPTION=ouverte` rend les comptes utilisables tout de suite,
+`INSCRIPTION=fermee` interdit les inscriptions.
+
+Mot de passe oublié (la commande demande le nouveau mot de passe) :
 
 ```bash
-curl http://localhost:5001/api/v1/films?q=nolan
+docker compose exec api flask --app app mot-de-passe adresse@exemple.fr
+```
+
+## Utiliser l'API
+
+La référence complète (routes, droits, formats JSON, erreurs) est dans
+[`docs/api.md`](docs/api.md).
+
+```bash
+curl "http://localhost:5001/api/v1/films?q=nolan&tri=note&ordre=desc"
 ```
 
 Les écritures demandent un jeton, obtenu à la connexion :
@@ -49,7 +93,7 @@ Les écritures demandent un jeton, obtenu à la connexion :
 ```bash
 curl -X POST http://localhost:5001/api/v1/auth/connexion \
      -H 'Content-Type: application/json' \
-     -d '{"email": "demo@videotheque.local", "mot_de_passe": "videotheque"}'
+     -d '{"email": "admin@videotheque.local", "mot_de_passe": "<mot de passe>"}'
 ```
 
 ```bash
@@ -58,37 +102,53 @@ curl -X POST http://localhost:5001/api/v1/films \
      -d '{"titre": "Alien", "annee": 1979, "support": "physique", "genres": ["Science-fiction"]}'
 ```
 
-| Méthode | URL (sous `/api/v1`) | Opération |
-|---|---|---|
-| GET | `/sante` | état de l'API et de la base |
-| POST | `/auth/inscription`, `/auth/connexion` | création de compte, connexion |
-| GET 🔒 | `/auth/moi` | utilisateur connecté |
-| GET | `/films` | liste, recherche, filtres, tri, pagination |
-| POST 🔒 | `/films` | ajout |
-| GET | `/films/{id}` | détail |
-| PUT 🔒, PATCH 🔒 | `/films/{id}` | remplacement, modification partielle |
-| DELETE 🔒 | `/films/{id}` | suppression |
-| GET, POST 🔒 | `/films/{id}/prets` | historique des prêts, nouveau prêt |
-| GET | `/prets` | prêts (`?en_cours=true`) |
-| POST 🔒 | `/prets/{id}/retour` | retour d'un film |
-| DELETE 🔒 | `/prets/{id}` | suppression d'un prêt |
-| GET, POST 🔒 | `/genres` | liste, création |
-| DELETE 🔒 | `/genres/{id}` | suppression |
-| GET | `/statistiques` | chiffres clés |
+## Sécurité
 
-🔒 = en-tête `Authorization: Bearer <jeton>` requis.
+| Sujet | Mesure |
+|---|---|
+| Secrets | aucun secret dans le code ni valeur par défaut ; `.env` généré, lisible par son seul propriétaire ; l'API refuse de démarrer sans clé d'au moins 32 caractères |
+| Mots de passe | empreinte scrypt ; 10 caractères au minimum, mots de passe courants refusés |
+| Connexion | verrouillage de l'adresse après 5 échecs en 15 minutes ; même réponse et même temps de calcul que le compte existe ou non |
+| Jetons | signés HMAC-SHA256, valables 4 h, révoqués à la déconnexion, au changement de mot de passe ou de rôle, à la désactivation |
+| Droits | rôles vérifiés par l'API à chaque requête ; un membre ne modifie que ses films ; prêts et emplacements réservés aux utilisateurs connectés |
+| Entrées | liste blanche des champs, types et longueurs contrôlés, requêtes SQL toujours paramétrées, 1 Mo au plus par requête |
+| Base | l'API utilise un compte PostgreSQL sans droit de structure ; journal d'audit en ajout seul ; 5 secondes au plus par requête SQL |
+| Conteneurs | utilisateur non root, système de fichiers en lecture seule, aucune capacité Linux, base sur un réseau interne non publié |
+| Traçabilité | journal d'audit des opérations sensibles et des échecs de connexion |
+
+## Exploitation
+
+Sauvegarder la base (fichier dans `sauvegardes/`), puis la restaurer :
+
+```bash
+scripts/sauvegarde.sh
+```
+
+```bash
+scripts/restauration.sh sauvegardes/videotheque-AAAAMMJJ-HHMMSS.dump
+```
+
+Journaux des services :
+
+```bash
+docker compose logs -f api web
+```
+
+Le schéma n'est créé qu'à la première initialisation du volume de la base.
+Après une modification du schéma, il faut repartir d'une base neuve
+(`docker compose down -v`), en sauvegardant les données avant si besoin.
 
 ## Tests
 
-Script curl parcourant toutes les opérations sur l'application lancée
-(il crée puis supprime ses propres données) :
+Script curl : 57 appels sur l'application lancée, avec vérification des codes
+HTTP. Il crée puis supprime ses propres données.
 
 ```bash
 scripts/test_api.sh
 ```
 
-Tests automatiques (pytest), sur une base contenant le schéma **dont les tables
-seront vidées** :
+Tests automatiques (pytest), sur une base contenant le schéma et **dont les
+tables seront vidées** :
 
 ```bash
 pip install -r requirements-dev.txt
@@ -98,25 +158,37 @@ pip install -r requirements-dev.txt
 DATABASE_URL_TEST=postgresql://utilisateur:motdepasse@localhost:5432/videotheque_test python -m pytest
 ```
 
-## Organisation du code
+## Organisation du dépôt
 
 | Fichier | Contenu |
 |---|---|
-| `app/__init__.py` | création de l'application Flask, sérialisation JSON |
-| `app/db.py` | connexion PostgreSQL (une par requête) |
-| `app/erreurs.py` | erreurs renvoyées en JSON |
-| `app/auth.py` | comptes, jetons signés, décorateur `connexion_requise` |
-| `app/films.py`, `genres.py`, `prets.py`, `statistiques.py` | les ressources |
-| `Dockerfile`, `docker-compose.yml` | image de l'API, création coordonnée des conteneurs |
+| `app/__init__.py` | création de l'application, configuration, en-têtes de sécurité |
+| `app/auth.py` | comptes, jetons, verrouillage, contrôle des rôles |
+| `app/validation.py` | contrôle des données reçues |
+| `app/films.py`, `avis.py`, `genres.py`, `prets.py` | ressources du catalogue |
+| `app/utilisateurs.py`, `journal.py`, `audit.py` | administration des comptes, journal d'audit |
+| `app/echanges.py`, `statistiques.py` | import / export JSON, chiffres clés |
+| `app/cli.py` | commandes `init-admin` et `mot-de-passe` |
+| `app/db.py`, `erreurs.py` | connexion PostgreSQL, erreurs au format JSON |
+| `docker-compose*.yml`, `deploiement/Caddyfile` | création coordonnée des conteneurs, proxy HTTPS |
+| `Dockerfile`, `demarrage.sh`, `gunicorn.conf.py` | image de l'API |
+| `scripts/` | génération de `.env`, sauvegarde, restauration, test de l'API |
+| `tests/` | tests automatiques |
 
 ## Configuration
 
+Variables du fichier `.env` (lues par `docker compose`) :
+
 | Variable | Rôle |
 |---|---|
-| `DATABASE_URL` | adresse de la base (`postgresql://utilisateur:motdepasse@hôte:5432/base`) |
-| `SECRET_KEY` | clé de signature des jetons |
-| `DUREE_JETON_S` | durée de validité d'un jeton en secondes (8 h par défaut) |
-| `FLASK_DEBUG` | `1` : mode développement avec rechargement à chaud |
+| `POSTGRES_PASSWORD` | mot de passe du propriétaire de la base (administration, sauvegardes) |
+| `API_DB_PASSWORD` | mot de passe du compte SQL restreint utilisé par l'API |
+| `API_SECRET_KEY`, `WEB_SECRET_KEY` | clés de signature des jetons et du cookie de session |
+| `ADMIN_EMAIL`, `ADMIN_MOT_DE_PASSE` | premier administrateur, créé au démarrage s'il n'existe pas |
+| `INSCRIPTION` | `validation` (défaut), `ouverte` ou `fermee` |
+| `DONNEES_DEMO` | `1` : charge les données de démonstration à la création de la base |
+| `WEB_PORT` | port du site en HTTP (8080) |
+| `NOM_DU_SITE` | nom ou adresse IP du site en HTTPS |
 
-Le serveur de développement de Flask suffit pour le TP ; en production il
-faudrait un serveur WSGI (gunicorn) et `FLASK_DEBUG=0`.
+Variables lues par l'API elle-même : `DATABASE_URL`, `SECRET_KEY`, `INSCRIPTION`,
+`DUREE_JETON_S` (14400), `MAX_ECHECS_CONNEXION` (5), `FENETRE_ECHECS_S` (900).
