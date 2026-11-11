@@ -14,7 +14,7 @@ RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin appl
 
 # Le code est copié dans l'image ; docker-compose monte en plus le dossier app/
 # de l'hôte par-dessus, en lecture seule (volume partagé demandé par le sujet).
-COPY demarrage.sh .
+COPY demarrage.sh gunicorn.conf.py ./
 COPY app/ app/
 
 USER appli
@@ -26,6 +26,4 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=15s --retries=5 \
 # Serveur WSGI de production (le serveur de développement de Flask, avec son
 # débogueur, n'est utilisé que par docker-compose.dev.yml).
 ENTRYPOINT ["sh", "/srv/demarrage.sh"]
-CMD ["gunicorn", "--bind=0.0.0.0:5000", "--workers=2", "--threads=4", \
-     "--worker-tmp-dir=/dev/shm", "--no-control-socket", "--access-logfile=-", \
-     "app:create_app()"]
+CMD ["gunicorn", "--config", "/srv/gunicorn.conf.py", "app:create_app()"]

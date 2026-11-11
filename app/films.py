@@ -54,6 +54,10 @@ def peut_modifier(film):
 
 def _completer(film):
     film["modifiable"] = peut_modifier(film)
+    if g.utilisateur is None:
+        # L'emplacement (étagère, chemin du fichier) est une information
+        # interne : elle n'est montrée qu'aux utilisateurs connectés.
+        film["emplacement"] = None
     return film
 
 

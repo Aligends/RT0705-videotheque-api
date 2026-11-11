@@ -33,7 +33,10 @@ def reponse_erreur(code, message, details=None, entetes=None):
 
 def corps_json():
     """Renvoie le corps JSON de la requête, qui doit être un objet."""
-    donnees = request.get_json(silent=True)
+    try:
+        donnees = request.get_json(silent=True)
+    except RecursionError:      # JSON imbriqué sur des milliers de niveaux
+        donnees = None
     if not isinstance(donnees, dict):
         raise ErreurAPI(400, "Le corps de la requête doit être un objet JSON "
                              "(en-tête Content-Type: application/json).")

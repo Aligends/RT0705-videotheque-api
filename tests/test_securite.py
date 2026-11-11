@@ -42,6 +42,13 @@ def test_erreurs_toujours_en_json(client, membre):
     assert reponse.status_code == 400 and "JSON" in reponse.json["erreur"]["message"]
 
 
+def test_json_trop_imbrique(client, membre):
+    corps = "[" * 100_000 + "]" * 100_000
+    reponse = client.post("/api/v1/films", data=corps, headers=membre,
+                          content_type="application/json")
+    assert reponse.status_code == 400
+
+
 def test_requete_trop_volumineuse(client, membre):
     reponse = client.post("/api/v1/films", headers=membre,
                           json={"titre": "Gros", "support": "physique", "synopsis": "x" * 1_100_000})

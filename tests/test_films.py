@@ -24,6 +24,11 @@ def test_cycle_de_vie(client, membre):
     # un visiteur voit le même film, sans droit de modification
     public = client.get("/api/v1/films/1").json["film"]
     assert public == {**film, "modifiable": False}
+    # l'emplacement (étagère, chemin du fichier) est réservé aux utilisateurs connectés
+    client.patch("/api/v1/films/1", json={"emplacement": "Étagère A1"}, headers=membre)
+    assert client.get("/api/v1/films/1", headers=membre).json["film"]["emplacement"] == "Étagère A1"
+    assert client.get("/api/v1/films/1").json["film"]["emplacement"] is None
+    assert client.get("/api/v1/films").json["films"][0]["emplacement"] is None
 
     # PATCH : seuls les champs fournis changent
     reponse = client.patch("/api/v1/films/1", json={"format": "Blu-ray"}, headers=membre)
