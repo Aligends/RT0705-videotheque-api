@@ -147,6 +147,13 @@ HTTP. Il crée puis supprime ses propres données.
 scripts/test_api.sh
 ```
 
+Parcours complet du site dans un navigateur (56 contrôles), sur une base
+neuve ; demande Node.js et Playwright, voir l'en-tête du fichier :
+
+```bash
+node tests/navigateur/parcours.js http://localhost:8080 "<mot de passe admin>" /tmp/captures
+```
+
 Tests automatiques (pytest), sur une base contenant le schéma et **dont les
 tables seront vidées** :
 
